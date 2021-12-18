@@ -1,0 +1,181 @@
+---
+layout: cover
+background: ./images/1.jpg
+---
+
+# Vite 原理与插件实践
+
+---
+
+## Vite 是什么？
+
+Vite 是一种新型前端构建工具，能够显著提升前端开发体验。
+它主要由两部分组成：
+
+-   一个开发服务器，它基于原生 ES 模块提供了丰富的内建功能。
+-   一套构建指令，它使用 Rollup 打包你的代码，并且它是预配置的，可输出用于生产环境的高度优化过的静态资源。
+
+---
+
+## Vite 的特点
+
+-   在开发过程中，vite 是一个开发服务器，根据浏览器的请求编译源文件。
+    无需捆绑，编译后真正做到按需使用。
+    未修改的文件会返回 304，所以浏览器根本就不会请求。
+    这就是它启动快、保持快的原因。
+
+-   Vite 支持热模块替换，这和 "简单的重载页面 "有本质的区别。
+    Vue 组件和 CSS HMR 是开箱即用的支持，第三方框架可以利用 HMR API。
+
+-   Vite 通过`esbuild`支持`.(t|j)sx?`文件，开箱即用，速度快得惊人。
+
+-   Vite 支持`.css`, `.less`, `.sass`等
+
+---
+
+## Vite 在开发中如何做到按需加载？
+
+Vite 有一个开发服务器，它根据浏览器的请求编译源文件，不会加载无关的文件。
+
+我写了一个 mini 版的 Vite，来理解它的原理。
+
+---
+
+## 来看 Vite 是如何加载运行的一段简单的 Vue3 代码
+
+---
+
+## layout: two-cols
+
+App.vue
+
+```html
+<template>
+    <div>
+        <h1>{{ count }} * 2 = {{ double }}</h1>
+        <button @click="add">click</button>
+    </div>
+</template>
+
+<script>
+    import { ref, computed } from 'vue'
+
+    export default {
+        setup() {
+            const count = ref(1)
+            function add() {
+                count.value++
+            }
+            const double = computed(() => count.value * 2)
+            return { count, double, add }
+        },
+    }
+</script>
+```
+
+::right::
+
+<Counter :count="10" m="t-4" />
+
+---
+
+在浏览器中打开 localhost:3000/，会返回包含处理过的 index.html 中的内容
+
+原代码：
+
+```html
+<!DOCTYPE html>
+<html>
+    <body>
+        <div id="app"></div>
+        <script type="module" src="/src/main.js"></script>
+    </body>
+</html>
+```
+
+---
+
+Vite 处理过后返回的代码：
+
+```html {5-7}
+<!DOCTYPE html>
+<html>
+    <body>
+        <div id="app"></div>
+        <script>
+            window.process = { env: { NODE_ENV: 'DEV' } }
+        </script>
+        <script type="module" src="/src/main.js"></script>
+    </body>
+</html>
+```
+
+---
+
+## 后台中处理 HTML 中的代码
+
+读取 HTML 文件，在字符串中插入 script 标签，定义 process 变量
+
+```js
+if (url == '/') {
+    let content = fs.readFileSync('./index.html', 'utf-8')
+    content = content.replace(
+        '<script',
+        `
+        <script>
+            window.process = {env:{NODE_ENV:'DEV'}}
+        </script>
+        <script`,
+    )
+    ctx.type = 'text/html'
+    ctx.body = content
+}
+```
+
+---
+
+html 中的 script 标签会向后台请求/src/main.js 文件
+原 main.js 代码：
+
+```js {1}
+import { createApp } from 'vue'
+import App from './App.vue'
+import './index.css'
+
+createApp(App).mount('#app')
+```
+
+经过 Vite 处理后，main.js 代码：
+
+```js {1}
+import { createApp } from '/@modules/vue'
+import App from './App.vue'
+import './index.css'
+
+createApp(App).mount('#app')
+```
+
+`import { createApp } from 'vue'` 被重新成 `import { createApp } from '/@modules/vue'`了
+
+---
+
+接着浏览器向后台请求/@modules/vue，后台会去读取node_modules/vue/package.json 的 module 字段，
+拿到 "dist/vue.runtime.esm-bundler.js"，接着去请求这个文件
+
+```js
+if (url.startsWith('/@modules/')) {
+    const prefix = path.resolve(__dirname, 'node_modules', url.replace('/@modules/', ''))
+    const module = require(prefix + '/package.json').module
+    const p = path.resolve(prefix, module)
+    const ret = fs.readFileSync(p, 'utf-8')
+    ctx.type = 'application/javascript'
+    ctx.body = rewriteImport(ret)
+}
+```
+
+---
+
+main.js里面还import了App.vue，浏览器会向后台请求/src/App.vue
+
+
+---
