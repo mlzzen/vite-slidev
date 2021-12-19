@@ -45,8 +45,6 @@ Vite 有一个开发服务器，它根据浏览器的请求编译源文件，不
 
 ---
 
-## layout: two-cols
-
 App.vue
 
 ```html
@@ -56,21 +54,18 @@ App.vue
         <button @click="add">click</button>
     </div>
 </template>
-
 <script>
     import { ref, computed } from 'vue'
-
     export default {
         setup() {
             const count = ref(1)
-            function add() {
-                count.value++
-            }
+            function add() { count.value++ }
             const double = computed(() => count.value * 2)
             return { count, double, add }
         },
     }
 </script>
+<style>h1 { color: red }</style>
 ```
 
 ::right::
@@ -159,7 +154,7 @@ createApp(App).mount('#app')
 
 ---
 
-接着浏览器向后台请求/@modules/vue，后台会去读取node_modules/vue/package.json 的 module 字段，
+接着浏览器向后台请求/@modules/vue，./App.vue, ./index.css。 后台收到/@modules/vue这样的请求，会去读取 node_modules/vue/package.json 的 module 字段，
 拿到 "dist/vue.runtime.esm-bundler.js"，接着去请求这个文件
 
 ```js
@@ -175,7 +170,144 @@ if (url.startsWith('/@modules/')) {
 
 ---
 
-main.js里面还import了App.vue，浏览器会向后台请求/src/App.vue
+main.js 里面还 import 了 App.vue，浏览器会向后台请求/src/App.vue
 
+App.vue 原代码：
+
+```html
+<template>
+    <div>
+        <h1>{{ count }} * 2 = {{ double }}</h1>
+        <button @click="add">click</button>
+    </div>
+</template>
+
+<script>
+    import { ref, computed } from 'vue'
+    export default {
+        setup() {
+            const count = ref(1)
+            function add() { count.value++ }
+            const double = computed(() => count.value * 2)
+            return { count, double, add }
+        },
+    }
+</script>
+<style>h1 { color: red }</style>
+```
 
 ---
+
+后台处理的代码：
+
+```js
+if (url.indexOf('.vue') > -1) {
+    const p = path.resolve(__dirname, url.split('?')[0].slice(1))
+    const { descriptor } = compilerSfc.parse(fs.readFileSync(p, 'utf-8'))
+    // ?type=template
+    if (!query.type) {
+        ctx.type = 'application/javascript'
+        ctx.body = `
+            ${rewriteImport(descriptor.script.content).replace(
+                'export default',
+                'const __script =',
+            )}
+            import { render as __render } from "${url}?type=template"
+            __script.render = __render
+            export default __script
+        `
+    } else if (query.type == 'template') {
+        const template = descriptor.template
+        const render = compileDom.compile(template.content, { mode: 'module' }).code
+        ctx.type = 'application/javascript'
+        ctx.body = rewriteImport(render)
+    }
+}
+```
+
+---
+
+Vite 处理过的 App.vue：
+
+```js
+import { ref, computed } from '/@modules/vue'
+const __script = {
+    setup() {
+        const count = ref(1)
+        function add() {
+            count.value++
+        }
+        const double = computed(() => count.value * 2)
+        return { count, double, add }
+    },
+}
+import { render as __render } from '/src/App.vue?type=template'
+__script.render = __render
+export default __script
+```
+
+这里主要是请求 template 里面的内容，发送一个/src/App.vue?type=template 请求
+
+---
+
+/src/App.vue?type=template 请求返回的内容：
+可以看到 compileDom.compile 函数把 App.vue 的 template 编译成一个 render 函数了
+
+```js
+export function render(_ctx, _cache) {
+    return (
+        _openBlock(),
+        _createElementBlock('div', null, [
+            _createElementVNode(
+                'h1',
+                null,
+                _toDisplayString(_ctx.count) + ' * 2 = ' + _toDisplayString(_ctx.double),
+                1 /* TEXT */,
+            ),
+            _createElementVNode('button', { onClick: _ctx.add }, 'click', 8 /* PROPS */, [
+                'onClick',
+            ]),
+        ])
+    )
+}
+```
+
+---
+
+后台处理style的代码：
+```js
+if (url.endsWith('.css')) {
+    const p = path.resolve(__dirname, url.slice(1))
+    const file = fs.readFileSync(p, 'utf-8')
+    const content = `
+        const css = '${file.replace(/\n/g, '')}'
+        let link = document.createElement('style')
+        link.setAttribute('type','text/css')
+        document.head.appendChild(link)
+        link.innerHTML = css
+        export default css
+    `
+    ctx.type = 'application/javascript'
+    ctx.body = content
+}
+```
+
+---
+
+./index.css请求返回的内容：
+```js
+const css = 'h1 { color: red;}'
+let link = document.createElement('style')
+link.setAttribute('type','text/css')
+document.head.appendChild(link)
+link.innerHTML = css
+export default css
+```
+
+---
+
+因为请求/@modules/vue返回的内容中import了/@modules/@vue/runtime-dom，所以浏览器会向后台请求/@modules/@vue/runtime-dom，
+直到把所有依赖请求加载完毕，然后页面才会渲染。
+
+---
+
