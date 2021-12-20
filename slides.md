@@ -313,3 +313,54 @@ export default css
 layout: end
 ---
 
+插件代码：
+```ts
+export function filemanager(userOptions: UserOptions = {
+    source: './dist',
+    destination: './dist.zip',
+}): PluginOption {
+    const { source, destination } = userOptions;
+    return {
+        name: 'vite-plugin-file-manager',
+        apply: 'build',
+        closeBundle() {
+            const output = fs.createWriteStream(destination as string)
+            const archive = archiver('zip')
+            output.on('close', function () {
+                console.log('archiver done')
+            })
+            archive.on('error', function (err) {
+                throw err
+            })
+            archive.pipe(output)
+            archive.glob('**/*', {
+                cwd: source,
+            })
+            archive.finalize()
+        }
+    }
+}
+```
+
+---
+
+vite.config.ts中的配置：
+```ts
+import { defineConfig, PluginOption } from 'vite'
+import { filemanager } from 'vite-plugin-filemanager'
+import vue from '@vitejs/plugin-vue'
+import path from 'path/posix'
+
+export default defineConfig({
+    plugins: [vue(), (filemanager({
+        source: path.join(__dirname, '/dist/'),
+        destination: path.join(__dirname, '/dist.zip'),
+    }) as PluginOption)],
+})
+```
+
+---
+layout: end
+---
+
+
