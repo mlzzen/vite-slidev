@@ -349,12 +349,11 @@ vite.config.ts中的配置：
 import { defineConfig, PluginOption } from 'vite'
 import { filemanager } from 'vite-plugin-filemanager'
 import vue from '@vitejs/plugin-vue'
-import path from 'path/posix'
 
 export default defineConfig({
     plugins: [vue(), (filemanager({
-        source: path.join(__dirname, '/dist/'),
-        destination: path.join(__dirname, '/dist.zip'),
+        source: './dist/',
+        destination: './dist.zip',
     }) as PluginOption)],
 })
 ```
